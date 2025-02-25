@@ -1,5 +1,10 @@
-tkinter==0.1.0              # Built-in Python library for GUI (no installation needed)
-pygments==2.16.1            # Syntax highlighting for Python code
-langchain-ollama==0.1.0     # Integration with Ollama models
-langgraph==0.1.0            # Stateful conversation management
-requests==2.31.0            # HTTP requests for fetching Ollama models
+requests==2.32.3
+langchain-ollama==0.2.3
+langchain-core==0.3.39
+langgraph==0.2.74
+langgraph-checkpoint==2.0.16
+Pygments==2.19.1
+typing-extensions==4.12.2
+
+# tkinter es necesario para la interfaz gráfica, pero generalmente viene con Python.
+# En sistemas donde no esté incluido, instálalo usando el gestor de paquetes del sistema.
