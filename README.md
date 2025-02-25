@@ -3,7 +3,8 @@
 A Python-based graphical interface for interacting with **Ollama** language models. This application allows you to select a model, input prompts, and receive real-time responses while maintaining a conversation history for better context.
 
 
-![image](https://github.com/user-attachments/assets/170b7285-136a-44e5-b29a-77534f0f603e)
+![image](https://github.com/user-attachments/assets/e17dd7cf-783d-43e9-9f4a-da9adc3ecf8e)
+
 
 ---
 
