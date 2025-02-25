@@ -12,49 +12,50 @@ from langgraph.checkpoint.memory import MemorySaver
 from typing import Annotated, TypedDict
 import requests
 
-# Definición del estado con persistencia
+# State definition with persistence
 class ChatState(TypedDict):
-    messages: Annotated[list, lambda x, y: x + y]  # Reducer para agregar mensajes
+    messages: Annotated[list, lambda x, y: x + y]  # Reducer to append messages
 
 class OllamaInterface:
     def __init__(self, root):
         self.root = root
-        self.root.title("Silane Model Interface")
+        self.root.title("Chat Interface GUI with Ollama")
         self.root.geometry("1000x600")
         self.root.configure(bg="#2E3440")
 
         self.root.grid_columnconfigure(0, weight=1)
         self.root.grid_rowconfigure(0, weight=1)
 
-        self.modelos = self.obtener_modelos()
-        if not self.modelos:
-            messagebox.showerror("Error", "No se pudieron cargar los modelos. Verifica la conexión con Ollama.")
+        self.models = self.get_models()
+        if not self.models:
+            messagebox.showerror("Error", "Could not load models. Please check your connection to Ollama.")
             self.root.destroy()
             return
 
         self.llm = None
-        self.checkpointer = MemorySaver()  # Checkpointer para persistencia
-        self.grafo_conversacion = self.crear_grafo_conversacion()  # Grafo de LangGraph
-        self.respuesta_queue = queue.Queue()
-        self.verificar_respuesta()
-        self.animacion_activa = False
-        self.current_thread = None  # Hilo actual de conversación
+        self.checkpointer = MemorySaver()  # Checkpointer for persistence
+        self.conversation_graph = self.create_conversation_graph()  # LangGraph graph
+        self.response_queue = queue.Queue()
+        self.animation_active = False
+        self.current_thread = None  # Current conversation thread
+        self.window_open = True  # Flag to check if the window is open
 
-        self.crear_interfaz()
+        self.create_interface()
+        self.check_response()
 
-    def obtener_modelos(self):
+    def get_models(self):
         try:
             response = requests.get("http://localhost:11434/api/tags")
             if response.status_code == 200:
-                return [modelo["name"] for modelo in response.json()["models"]]
+                return [model["name"] for model in response.json()["models"]]
             else:
-                messagebox.showerror("Error", f"No se pudieron obtener los modelos: {response.text}")
+                messagebox.showerror("Error", f"Could not fetch models: {response.text}")
                 return []
         except Exception as e:
-            messagebox.showerror("Error", f"Error de conexión: {str(e)}")
+            messagebox.showerror("Error", f"Connection error: {str(e)}")
             return []
 
-    def crear_interfaz(self):
+    def create_interface(self):
         main_frame = ttk.Frame(self.root, padding="10")
         main_frame.grid(row=0, column=0, sticky="nsew")
         main_frame.grid_columnconfigure(0, weight=1)
@@ -68,157 +69,167 @@ class OllamaInterface:
         style.configure("TFrame", background="#2E3440")
         style.configure("TText", background="#3B4252", foreground="#ECEFF4", font=("Arial", 14))
 
-        pregunta_frame = ttk.Frame(main_frame)
-        pregunta_frame.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
-        pregunta_frame.grid_columnconfigure(0, weight=1)
-        pregunta_frame.grid_columnconfigure(1, weight=1)
-        pregunta_frame.grid_rowconfigure(1, weight=1)
+        prompt_frame = ttk.Frame(main_frame)
+        prompt_frame.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+        prompt_frame.grid_columnconfigure(0, weight=1)
+        prompt_frame.grid_columnconfigure(1, weight=1)
+        prompt_frame.grid_rowconfigure(1, weight=1)
 
-        ttk.Label(pregunta_frame, text="Selecciona un modelo:").grid(row=0, column=0, sticky=tk.W, pady=5, padx=5)
-        self.combo_modelos = ttk.Combobox(pregunta_frame, values=self.modelos, width=40)
-        self.combo_modelos.grid(row=0, column=1, pady=5, padx=5, sticky="ew")
-        self.combo_modelos.current(0)
+        ttk.Label(prompt_frame, text="Select a model:").grid(row=0, column=0, sticky=tk.W, pady=5, padx=5)
+        self.model_combobox = ttk.Combobox(prompt_frame, values=self.models, width=40)
+        self.model_combobox.grid(row=0, column=1, pady=5, padx=5, sticky="ew")
+        self.model_combobox.current(0)
 
-        ttk.Label(pregunta_frame, text="Ingresa tu prompt:").grid(row=1, column=0, sticky=tk.W, pady=5, padx=5)
-        self.entrada_prompt = tk.Text(pregunta_frame, height=10, width=50, bg="#3B4252", fg="#ECEFF4", insertbackground="#ECEFF4", font=("Arial", 14))
-        self.entrada_prompt.grid(row=1, column=1, pady=5, padx=5, sticky="nsew")
-        self.entrada_prompt.bind("<Control-Return>", self.iniciar_generacion_respuesta)
+        ttk.Label(prompt_frame, text="Enter your prompt:").grid(row=1, column=0, sticky=tk.W, pady=5, padx=5)
+        self.prompt_entry = tk.Text(prompt_frame, height=10, width=50, bg="#3B4252", fg="#ECEFF4", insertbackground="#ECEFF4", font=("Arial", 14))
+        self.prompt_entry.grid(row=1, column=1, pady=5, padx=5, sticky="nsew")
+        self.prompt_entry.bind("<Control-Return>", self.start_response_generation)
 
-        self.boton_generar = ttk.Button(pregunta_frame, text="Generar Respuesta", command=self.iniciar_generacion_respuesta)
-        self.boton_generar.grid(row=2, column=1, pady=10, padx=5, sticky="e")
+        self.generate_button = ttk.Button(prompt_frame, text="Generate Response", command=self.start_response_generation)
+        self.generate_button.grid(row=2, column=1, pady=10, padx=5, sticky="e")
 
-        respuesta_frame = ttk.Frame(main_frame)
-        respuesta_frame.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
-        respuesta_frame.grid_columnconfigure(0, weight=1)
-        respuesta_frame.grid_rowconfigure(1, weight=1)
+        response_frame = ttk.Frame(main_frame)
+        response_frame.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
+        response_frame.grid_columnconfigure(0, weight=1)
+        response_frame.grid_rowconfigure(1, weight=1)
 
-        ttk.Label(respuesta_frame, text="Respuesta del Modelo:").grid(row=0, column=0, sticky=tk.W, pady=5, padx=5)
-        self.area_respuesta = scrolledtext.ScrolledText(respuesta_frame, wrap=tk.WORD, width=70, height=20, state=tk.DISABLED, bg="#3B4252", fg="#ECEFF4", insertbackground="#ECEFF4", font=("Arial", 14))
-        self.area_respuesta.grid(row=1, column=0, pady=5, padx=5, sticky="nsew")
-        self.area_respuesta.config(state=tk.NORMAL)
-        self.area_respuesta.insert(tk.END, "Por favor, selecciona un modelo y escribe un prompt para comenzar.")
-        self.area_respuesta.config(state=tk.DISABLED)
+        ttk.Label(response_frame, text="Model Response:").grid(row=0, column=0, sticky=tk.W, pady=5, padx=5)
+        self.response_area = scrolledtext.ScrolledText(response_frame, wrap=tk.WORD, width=70, height=20, state=tk.DISABLED, bg="#3B4252", fg="#ECEFF4", insertbackground="#ECEFF4", font=("Arial", 14))
+        self.response_area.grid(row=1, column=0, pady=5, padx=5, sticky="nsew")
+        self.response_area.config(state=tk.NORMAL)
+        self.response_area.insert(tk.END, "Please select a model and enter a prompt to begin.")
+        self.response_area.config(state=tk.DISABLED)
 
-        self.boton_exportar = ttk.Button(respuesta_frame, text="Exportar Respuesta", command=self.exportar_respuesta, state=tk.DISABLED)
-        self.boton_exportar.grid(row=2, column=0, pady=10, padx=5, sticky="e")
+        self.export_button = ttk.Button(response_frame, text="Export Response", command=self.export_response, state=tk.DISABLED)
+        self.export_button.grid(row=2, column=0, pady=10, padx=5, sticky="e")
 
-        self.estado_label = ttk.Label(pregunta_frame, text="", font=("Arial", 12))
-        self.estado_label.grid(row=4, column=1, pady=5, padx=5, sticky="w")
+        self.status_label = ttk.Label(prompt_frame, text="", font=("Arial", 12))
+        self.status_label.grid(row=4, column=1, pady=5, padx=5, sticky="w")
 
-    def crear_grafo_conversacion(self):
-        # Crear el grafo de LangGraph
+    def create_conversation_graph(self):
+        # Create the LangGraph graph
         builder = StateGraph(ChatState)
 
-        # Nodo para generar una respuesta usando el modelo
-        builder.add_node("chatbot", self.invocar_modelo)
-        builder.add_edge(START, "chatbot")  # Punto de inicio
-        builder.add_edge("chatbot", END)    # Punto de finalización
+        # Node to generate a response using the model
+        builder.add_node("chatbot", self.invoke_model)
+        builder.add_edge(START, "chatbot")  # Entry point
+        builder.add_edge("chatbot", END)    # Exit point
 
-        # Compilar el grafo con persistencia
+        # Compile the graph with persistence
         return builder.compile(checkpointer=self.checkpointer)
 
-    def invocar_modelo(self, state: ChatState):
-        # Generar una respuesta usando el modelo
-        respuesta = self.llm.invoke(state["messages"])
-        return {"messages": [AIMessage(content=respuesta)]}
+    def invoke_model(self, state: ChatState):
+        # Generate a response using the model
+        response = self.llm.invoke(state["messages"])
+        return {"messages": [AIMessage(content=response)]}
 
-    def iniciar_generacion_respuesta(self, event=None):
-        # Deshabilitar el botón mientras se genera la respuesta
-        self.boton_generar.config(state=tk.DISABLED)
-        self.boton_exportar.config(state=tk.DISABLED)
-        self.area_respuesta.config(state=tk.NORMAL)
-        self.area_respuesta.delete("1.0", tk.END)
-        self.area_respuesta.config(state=tk.DISABLED)
+    def start_response_generation(self, event=None):
+        # Disable the button while generating the response
+        self.generate_button.config(state=tk.DISABLED)
+        self.export_button.config(state=tk.DISABLED)
+        self.response_area.config(state=tk.NORMAL)
+        self.response_area.delete("1.0", tk.END)
+        self.response_area.insert(tk.END, "Thinking...")  # Show "Thinking..." while generating the response
+        self.response_area.config(state=tk.DISABLED)
 
-        modelo_seleccionado = self.combo_modelos.get()
-        prompt = self.entrada_prompt.get("1.0", tk.END).strip()
+        selected_model = self.model_combobox.get()
+        prompt = self.prompt_entry.get("1.0", tk.END).strip()
 
-        if not modelo_seleccionado or not prompt:
-            messagebox.showwarning("Advertencia", "Selecciona un modelo y escribe un prompt.")
-            self.boton_generar.config(state=tk.NORMAL)
-            self.estado_label.config(text="")
+        if not selected_model or not prompt:
+            messagebox.showwarning("Warning", "Please select a model and enter a prompt.")
+            self.generate_button.config(state=tk.NORMAL)
+            self.status_label.config(text="")
             return
 
-        self.llm = OllamaLLM(model=modelo_seleccionado)
+        self.llm = OllamaLLM(model=selected_model)
 
-        # Crear un nuevo thread si es necesario
+        # Create a new thread if necessary
         if not self.current_thread:
             self.current_thread = f"thread_{time.time()}"
 
-        # Ejecutar en un hilo separado
+        # Run in a separate thread
         threading.Thread(
-            target=self.generar_respuesta,
+            target=self.generate_response,
             args=(prompt, self.current_thread),
             daemon=True
         ).start()
 
-    def generar_respuesta(self, prompt, thread_id):
+    def generate_response(self, prompt, thread_id):
         try:
-            # Configuración del thread para persistencia
+            # Thread configuration for persistence
             config = {"configurable": {"thread_id": thread_id}}
 
-            # Crear el mensaje inicial
-            mensaje_inicial = HumanMessage(content=prompt)
+            # Create the initial message
+            initial_message = HumanMessage(content=prompt)
 
-            # Ejecutar el grafo con persistencia
-            for event in self.grafo_conversacion.stream(
-                {"messages": [mensaje_inicial]},
+            # Run the graph with persistence
+            for event in self.conversation_graph.stream(
+                {"messages": [initial_message]},
                 config=config,
                 stream_mode="values"
             ):
                 if "messages" in event:
-                    respuesta = event["messages"][-1].content
-                    self.respuesta_queue.put(respuesta)
+                    response = event["messages"][-1].content
+                    self.response_queue.put(response)  # Only put the response in the queue
 
         except Exception as e:
-            self.respuesta_queue.put(f"Error: {str(e)}")
+            self.response_queue.put(f"Error: {str(e)}")
         finally:
-            self.animacion_activa = False
+            self.animation_active = False
 
-    def verificar_respuesta(self):
+    def check_response(self):
+        if not self.window_open:
+            return  # Stop if the window is closed
+
         try:
-            respuesta = self.respuesta_queue.get_nowait()
-            self.mostrar_respuesta(respuesta)
-            self.boton_generar.config(state=tk.NORMAL)  # Habilitar el botón
-            self.boton_exportar.config(state=tk.NORMAL)  # Habilitar el botón de exportar
-            self.estado_label.config(text="")
+            response = self.response_queue.get_nowait()
+            self.show_response(response)
+            self.generate_button.config(state=tk.NORMAL)  # Enable the button
+            self.export_button.config(state=tk.NORMAL)  # Enable the export button
+            self.status_label.config(text="")
         except queue.Empty:
             pass
         finally:
-            self.root.after(100, self.verificar_respuesta)
+            if self.window_open:
+                self.root.after(100, self.check_response)
 
-    def mostrar_respuesta(self, respuesta):
-        self.area_respuesta.config(state=tk.NORMAL)
-        self.area_respuesta.delete("1.0", tk.END)
+    def show_response(self, response):
+        self.response_area.config(state=tk.NORMAL)
+        self.response_area.delete("1.0", tk.END)  # Clear the "Thinking..." message
 
-        respuesta_formateada = respuesta
+        formatted_response = response
 
-        if "python" in self.combo_modelos.get().lower():
+        if "python" in self.model_combobox.get().lower():
             lexer = PythonLexer()
-            tokens = lex(respuesta_formateada, lexer)
+            tokens = lex(formatted_response, lexer)
             for token_type, value in tokens:
-                self.area_respuesta.insert(tk.END, value, token_type)
+                self.response_area.insert(tk.END, value, token_type)
         else:
-            self.area_respuesta.insert(tk.END, respuesta_formateada)
+            self.response_area.insert(tk.END, formatted_response)  # Insert only the model's response
 
-        self.area_respuesta.config(state=tk.DISABLED)
+        self.response_area.config(state=tk.DISABLED)
 
-    def exportar_respuesta(self):
-        respuesta = self.area_respuesta.get("1.0", tk.END).strip()
-        if not respuesta:
-            messagebox.showwarning("Advertencia", "No hay respuesta para exportar.")
+    def export_response(self):
+        response = self.response_area.get("1.0", tk.END).strip()
+        if not response:
+            messagebox.showwarning("Warning", "No response to export.")
             return
 
-        file_path = filedialog.asksaveasfilename(defaultextension=".txt", filetypes=[("Archivos de texto", "*.txt")])
+        file_path = filedialog.asksaveasfilename(defaultextension=".txt", filetypes=[("Text Files", "*.txt")])
         if file_path:
             try:
                 with open(file_path, "w") as file:
-                    file.write(respuesta)
-                messagebox.showinfo("Éxito", "Respuesta exportada correctamente.")
+                    file.write(response)
+                messagebox.showinfo("Success", "Response exported successfully.")
             except Exception as e:
-                messagebox.showerror("Error", f"No se pudo exportar la respuesta: {str(e)}")
+                messagebox.showerror("Error", f"Failed to export response: {str(e)}")
+
+    def on_close(self):
+        self.window_open = False  # Set the flag to False when the window is closed
+        self.root.destroy()
 
 if __name__ == "__main__":
     root = tk.Tk()
     app = OllamaInterface(root)
+    root.protocol("WM_DELETE_WINDOW", app.on_close)  # Handle window close event
     root.mainloop()
