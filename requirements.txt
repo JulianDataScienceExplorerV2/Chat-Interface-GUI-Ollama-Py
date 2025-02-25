@@ -1,0 +1,5 @@
+tkinter==0.1.0              # Built-in Python library for GUI (no installation needed)
+pygments==2.16.1            # Syntax highlighting for Python code
+langchain-ollama==0.1.0     # Integration with Ollama models
+langgraph==0.1.0            # Stateful conversation management
+requests==2.31.0            # HTTP requests for fetching Ollama models
